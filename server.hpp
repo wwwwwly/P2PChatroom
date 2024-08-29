@@ -24,8 +24,6 @@ enum STATUS
 class Server
 {
 private:
-    string ip;
-    int socket_port;
     int server_socket;
     int ConnectionInit();
     int DatabaseInit();
@@ -35,10 +33,12 @@ protected:
     MYSQL *database;
     vector<int> clock; // 向量时钟
     int max_user_id;
+    string server_ip;
+    int socket_port;
 
 public:
     Server() {}
-    Server(const string &_ip, const int &_port) : ip{_ip}, socket_port{_port}
+    Server(const string &_ip, const int &_port) : server_ip{_ip}, socket_port{_port}
     {
         ConnectionInit();
         DatabaseInit();

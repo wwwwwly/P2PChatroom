@@ -14,7 +14,7 @@ int Server::ConnectionInit()
     struct sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = inet_addr(ip.c_str());
+    server_addr.sin_addr.s_addr = inet_addr(server_ip.c_str());
     server_addr.sin_port = htons(socket_port); // 端口号需要从主机字节序转换为网络字节序  因为端口号在0~65535之间，故可以用htons处理int
 
     if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
@@ -42,7 +42,7 @@ int Server::DatabaseInit()
         cerr << "ERROR: Failed to init MySQL.\n";
         status = ERROR;
     }
-    if (mysql_real_connect(database, ip.c_str(), "root", "12345678", "p2p", 3306, nullptr, 0) == nullptr)
+    if (mysql_real_connect(database, server_ip.c_str(), "root", "12345678", "p2p", 3306, nullptr, 0) == nullptr)
     {
         cerr << "ERROR: Failed to connect MySQL.\n";
         status = ERROR;

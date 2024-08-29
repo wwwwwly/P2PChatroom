@@ -1,6 +1,6 @@
-#include "server.hpp"
+#include "client.hpp"
 
-class Account : private Server
+class Account : private Client
 {
 private:
     int user_id;
