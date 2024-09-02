@@ -11,13 +11,16 @@ int Server::ConnectionInit()
         status = ERROR;
     }
 
-    struct sockaddr_in server_addr;
+    int opt = 1;
+    setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)); // 端口重用
+
+    sockaddr_in server_addr;
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = inet_addr(server_ip.c_str());
     server_addr.sin_port = htons(socket_port); // 端口号需要从主机字节序转换为网络字节序  因为端口号在0~65535之间，故可以用htons处理int
 
-    if (bind(server_socket, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1)
+    if (bind(server_socket, (sockaddr *)&server_addr, sizeof(server_addr)) == -1)
     {
         cerr << "ERROR: Failed to bind server socket.\n";
         cout << "ERROR message: " << strerror(errno) << '\n';
@@ -30,6 +33,7 @@ int Server::ConnectionInit()
         cout << "ERROR message: " << strerror(errno) << '\n';
         status = ERROR;
     };
+
     return status;
 }
 
@@ -53,12 +57,13 @@ int Server::DatabaseInit()
                                                       "user_id int(9) not null,"
                                                       "user_name nvarchar(20) not null,"
                                                       "time_stamp int(9) not null,"
-                                                      "message nvarchar(200) not null,"
-                                                      "primary key(user_id,time_stamp)"
-                                                      ");";
+                                                      "message nvarchar(" +
+                       to_string(msg_len) + ") not null,"
+                                            "primary key(user_id,time_stamp)"
+                                            ");";
     if (mysql_query(database, sql_query.c_str()))
     {
-        cerr << "ERROR: Failed to create chat_recard table.\n";
+        cerr << "ERROR: Failed to create chat_record table.\n";
         status = ERROR;
     }
     return status;
@@ -101,4 +106,51 @@ int Server::GetMaxUserID()
     mysql_free_result(res);
 
     return atoi(row[0]);
+}
+
+int Server::Send(const string &message)
+{
+    int status = SUCCESS;
+
+    sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    int client_socket = accept(server_socket, (sockaddr *)&client_addr, &client_addr_len);
+
+    if (write(client_socket, message.c_str(), message.size()) == -1)
+    {
+        cerr << "ERROR: Server failed to send.\n";
+        cout << "ERROR message: " << strerror(errno) << '\n';
+        status = ERROR;
+    }
+    cout << "Server::Send:" << message << endl;
+    close(client_socket);
+
+    return status;
+}
+
+int Server::Receive(string &message)
+{
+    cout << "Server::Receive1\n";
+
+    int status = SUCCESS;
+
+    sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    int client_socket = accept(server_socket, (sockaddr *)&client_addr, &client_addr_len);
+
+    cout << "Server::Receive2\n";
+
+    char *buffer = new char[msg_len];
+    if (read(client_socket, buffer, msg_len) == -1)
+    {
+        cerr << "ERROR: Server failed to receive.\n";
+        cout << "ERROR message: " << strerror(errno) << '\n';
+        status = ERROR;
+    }
+
+    message = string(buffer);
+    delete buffer;
+    close(client_socket);
+
+    return status;
 }

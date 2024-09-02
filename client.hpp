@@ -12,8 +12,16 @@ protected:
 
 public:
     Client() {}
-    Client(string ip, int port) : client_ip{ip}, client_port{port}
+    Client(const string &ip, const int &port)
     {
+        server_ip = ip;
+        socket_port = port;
         ConnectionInit();
+    }
+    int Send(const string &message);
+    int Receive(string &buffer);
+    virtual ~Client()
+    {
+        close(client_socket);
     }
 };

@@ -20,4 +20,5 @@ public:
     int Rename(const string &new_name);         // 修改用户名
     int Exit();                                 // 离线
     int ChangePassword(const string &new_pass); // 修改密码
+    ~Account() {}
 };
