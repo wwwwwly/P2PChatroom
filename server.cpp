@@ -1,5 +1,20 @@
 #include "server.hpp"
 
+#include <iostream>
+#include <memory>
+#include <ctime>
+#include <cstring>
+
+#include <sys/socket.h>
+#include <netinet/in.h>   // 定义TCP/IP相关的一些结构体和函数，包含了IPPROTO_TCP的定义
+#include <arpa/inet.h>    //主要处理IPV4地址的转换，网络字节序和主机字节序的转换，包含了inet_addr的定义
+#include <event2/event.h> //libevent
+
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
 int Server::ConnectionInit()
 {
     int status = SUCCESS;
@@ -34,6 +49,34 @@ int Server::ConnectionInit()
         status = ERROR;
     };
 
+    sockaddr_in client_addr;
+    socklen_t client_addr_len = sizeof(client_addr);
+    int client_socket = accept(server_socket, (sockaddr *)&client_addr, &client_addr_len);
+
+    evutil_make_socket_nonblocking(server_socket); // 设置无阻赛
+
+    // 创建event_base 事件的集合，多线程的话 每个线程都要初始化一个event_base
+    event_base *base_event;
+    base_event = event_base_new();
+    string method = event_base_get_method(
+        base_event); // 获取IO多路复用的模型，windows一般为IOCP,linux一般为epoll
+    cout << "METHOD:" << method << endl;
+
+    // 创建一个事件，类型为持久性EV_PERSIST，回调函数为do_accept（主要用于监听连接进来的客户端）
+    // 将base_ev传递到do_accept中的arg参数
+    event *ev;
+    ev = event_new(base_event, server_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
+                   do_accept, base_event);
+
+    // 注册事件，使事件处于 pending的等待状态
+    event_add(ev, NULL);
+
+    // 事件循环
+    event_base_dispatch(base_event);
+
+    // 销毁event_base
+    event_base_free(base_event);
+
     return status;
 }
 
@@ -58,9 +101,9 @@ int Server::DatabaseInit()
                                                       "user_name nvarchar(20) not null,"
                                                       "time_stamp int(9) not null,"
                                                       "message nvarchar(" +
-                       to_string(msg_len) + ") not null,"
-                                            "primary key(user_id,time_stamp)"
-                                            ");";
+                       std::to_string(msg_len) + ") not null,"
+                                                 "primary key(user_id,time_stamp)"
+                                                 ");";
     if (mysql_query(database, sql_query.c_str()))
     {
         cerr << "ERROR: Failed to create chat_record table.\n";
@@ -108,13 +151,9 @@ int Server::GetMaxUserID()
     return atoi(row[0]);
 }
 
-int Server::Send(const string &message)
+int Server::Send(const string &message, int client_socket)
 {
     int status = SUCCESS;
-
-    sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-    int client_socket = accept(server_socket, (sockaddr *)&client_addr, &client_addr_len);
 
     if (write(client_socket, message.c_str(), message.size()) == -1)
     {
@@ -128,17 +167,9 @@ int Server::Send(const string &message)
     return status;
 }
 
-int Server::Receive(string &message)
+int Server::Receive(string &message, int client_socket)
 {
-    cout << "Server::Receive1\n";
-
     int status = SUCCESS;
-
-    sockaddr_in client_addr;
-    socklen_t client_addr_len = sizeof(client_addr);
-    int client_socket = accept(server_socket, (sockaddr *)&client_addr, &client_addr_len);
-
-    cout << "Server::Receive2\n";
 
     char *buffer = new char[msg_len];
     if (read(client_socket, buffer, msg_len) == -1)

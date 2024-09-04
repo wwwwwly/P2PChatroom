@@ -1,12 +1,22 @@
 #include "account.hpp"
 
+#include <iostream>
+#include <memory>
+#include <ctime>
+#include <cstring>
+
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
 int Account::Check(int mode = 0)
 {
     int status = SUCCESS;
     if (mode == 0)
     {
         // 全部检查
-        string sql_query = "select count(*) from user_info where user_id=" + to_string(user_id) + ";";
+        string sql_query = "select count(*) from user_info where user_id=" + std::to_string(user_id) + ";";
         if (mysql_query(database, sql_query.c_str()))
         {
             cerr << "ERROR: Failed to check.\n";
@@ -55,7 +65,7 @@ int Account::Register()
         user_id = max_user_id + 1;
         string sql_query = "insert into user_info (user_id,user_name,password)"
                            "values(" +
-                           to_string(user_id) + user_name + password + ");";
+                           std::to_string(user_id) + user_name + password + ");";
         if (mysql_query(database, sql_query.c_str()))
         {
             cerr << "ERROR: Failed to register.\n";
@@ -71,7 +81,7 @@ int Account::Register()
 int Account::Login()
 {
     int status = SUCCESS;
-    string sql_query = "select password from user_info where user_id=" + to_string(user_id) + ";";
+    string sql_query = "select password from user_info where user_id=" + std::to_string(user_id) + ";";
     if (mysql_query(database, sql_query.c_str()))
     {
         cerr << "ERROR: Failed to login.\n";
@@ -102,7 +112,7 @@ int Account::Logout()
         status = INVALID;
     else
     {
-        string sql_query = "delete from user_info where user_id=" + to_string(user_id) + ";";
+        string sql_query = "delete from user_info where user_id=" + std::to_string(user_id) + ";";
         if (mysql_query(database, sql_query.c_str()))
         {
             cerr << "ERROR: Failed to logout.\n";
@@ -127,7 +137,7 @@ int Account::Rename(const string &new_name)
         status = flag;
     else
     {
-        string sql_query = "update user_info set user_name='" + user_name + "' where user_id=" + to_string(user_id) + ";";
+        string sql_query = "update user_info set user_name='" + user_name + "' where user_id=" + std::to_string(user_id) + ";";
         if (mysql_query(database, sql_query.c_str()))
         {
             cerr << "ERROR: Failed to rename.\n";
@@ -147,7 +157,7 @@ int Account::ChangePassword(const string &new_pass)
         status = flag;
     else
     {
-        string sql_query = "update user_info set password='" + password + "' where user_id=" + to_string(user_id) + ";";
+        string sql_query = "update user_info set password='" + password + "' where user_id=" + std::to_string(user_id) + ";";
         if (mysql_query(database, sql_query.c_str()))
         {
             cerr << "ERROR: Failed to change password.\n";

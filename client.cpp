@@ -1,5 +1,20 @@
 #include "client.hpp"
 
+#include <iostream>
+#include <memory>
+#include <ctime>
+#include <cstring>
+
+#include <sys/socket.h>
+#include <netinet/in.h>   // 定义TCP/IP相关的一些结构体和函数，包含了IPPROTO_TCP的定义
+#include <arpa/inet.h>    //主要处理IPV4地址的转换，网络字节序和主机字节序的转换，包含了inet_addr的定义
+#include <event2/event.h> //libevent
+
+using std::cerr;
+using std::cout;
+using std::endl;
+using std::string;
+
 int Client::ConnectionInit()
 {
     int status = SUCCESS;
