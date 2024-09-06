@@ -28,8 +28,8 @@ class Server
 private:
     int server_socket;
     int ConnectionInit();
-    int DatabaseInit();
-    int GetMaxUserID();
+    // int DatabaseInit();
+    // int GetMaxUserID();
     ThreadPool thread_pool;
     static std::vector<event_base *> bases;
     static std::vector<int> client_sockets;
@@ -53,10 +53,13 @@ public:
         thread_pool.setMode(PoolMode::MODE_CACHED);
     }
     std::string GetServerTime();
-    virtual int Send(const std::string &message, int client_socket);
+    int Send(const std::string &message, int client_socket);
     void BoardCast(const std::string &message);
-    virtual int Receive(std::string &message, int client_socket);
-    virtual ~Server()
+    int Receive(std::string &message, int client_socket);
+    void ConnectTo(const std::string &client_ip, const int &client_port);
+    void Connect();
+
+    ~Server()
     {
         close(server_socket);
         // mysql_close(database);

@@ -3,9 +3,10 @@
 
 using namespace std;
 
-int main()
+int main(int argc, char *argv[])
 {
-    Server server{"192.168.182.129", 6666};
+    Server server{"192.168.182.129", std::atoi(argv[0])};
+    server.ConnectTo("192.168.182.129", std::atoi(argv[1]));
     string message{"hello client!"};
     server.BoardCast(message);
 

@@ -33,9 +33,15 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
 {
     sockaddr_in client_address; // 客户端网络地址结构体
     socklen_t in_size = sizeof(client_address);
+
+    cout << 4 << endl;
+
     // 客户端socket
     int client_socket = accept(fd, (sockaddr *)&client_address,
                                &in_size); // 等待接受请求，这边是阻塞式的
+
+    cout << 5 << endl;
+
     if (client_socket < 0)
     {
         perror("ERROR:Fail to accept.\n");
@@ -73,6 +79,9 @@ int Server::ConnectionInit()
 {
     int status = SUCCESS;
     server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
+    cout << 1 << endl;
+
     if (server_socket == -1)
     {
         cerr << "ERROR: Failed to create server socket.\n";
@@ -96,12 +105,16 @@ int Server::ConnectionInit()
         status = ERROR;
     };
 
+    cout << 2 << endl;
+
     if (listen(server_socket, 32) == -1) // 连接请求队列长度32
     {
         cerr << "ERROR: Failed to listen.\n";
         cout << "ERROR message: " << strerror(errno) << '\n';
         status = ERROR;
     };
+
+    cout << 3 << endl;
 
     evutil_make_socket_nonblocking(server_socket); // 设置无阻赛
 
@@ -122,6 +135,23 @@ int Server::ConnectionInit()
     event_base_dispatch(base_event);
 
     return status;
+}
+
+void Server::ConnectTo(const std::string &client_ip, const int &client_port)
+{
+    // 向服务器发起请求
+    sockaddr_in client_address;
+    memset(&client_address, 0, sizeof(client_address)); // 每个字节都⽤0填充
+
+    client_address.sin_family = PF_INET;
+    client_address.sin_addr.s_addr = inet_addr(client_ip.c_str()); // 将套接字与服务器绑定
+    client_address.sin_port = htons(client_port);
+
+    connect(server_socket, (sockaddr *)&client_address, sizeof(sockaddr));
+}
+
+void Connect()
+{
 }
 
 // int Server::DatabaseInit()
