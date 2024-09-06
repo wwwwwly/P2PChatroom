@@ -5,10 +5,18 @@ using namespace std;
 
 int main(int argc, char *argv[])
 {
-    Server server{"192.168.182.129", std::atoi(argv[0])};
-    server.ConnectTo("192.168.182.129", std::atoi(argv[1]));
+    Server server{"192.168.182.129", 6666};
+    // server.ConnectTo("192.168.182.129", std::atoi(argv[2]));
     string message{"hello client!"};
-    server.BoardCast(message);
+
+    while (1)
+    {
+        cout << 1 << endl;
+        server.Print();
+        server.BoardCast(message);
+        cout << 2 << endl;
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+    }
 
     cin.get();
     return 0;

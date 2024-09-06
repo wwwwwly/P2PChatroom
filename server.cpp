@@ -25,7 +25,6 @@ void do_read(evutil_socket_t fd, short event_type, void *arg)
         std::unique_lock<std::mutex> lock(server->mtx);
         server->records.emplace_back(std::move(message));
     }
-    cout << message << endl;
 }
 
 // 回调函数，用于监听连接进来的客户端socket
@@ -34,13 +33,9 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
     sockaddr_in client_address; // 客户端网络地址结构体
     socklen_t in_size = sizeof(client_address);
 
-    cout << 4 << endl;
-
     // 客户端socket
     int client_socket = accept(fd, (sockaddr *)&client_address,
                                &in_size); // 等待接受请求，这边是阻塞式的
-
-    cout << 5 << endl;
 
     if (client_socket < 0)
     {
@@ -59,9 +54,10 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
         event *ev;
         ev = event_new(base_event, client_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
                    do_read, server); // 超时触发 socket可读时触发 保持未决
-        event_add(ev, NULL); }, base_event, client_socket);
-    // 创建一个事件，这个事件主要用于监听和读取客户端传递过来的数据
-    // 持久类型，并且将base_ev传递到do_read回调函数中去
+        // 注册事件，使事件处于 pending的等待状态 
+        event_add(ev, NULL); 
+        // 事件循环
+        event_base_dispatch(base_event); }, base_event, client_socket);
 }
 
 void do_send(evutil_socket_t fd, short event_type, void *arg)
@@ -79,8 +75,6 @@ int Server::ConnectionInit()
 {
     int status = SUCCESS;
     server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-
-    cout << 1 << endl;
 
     if (server_socket == -1)
     {
@@ -105,16 +99,12 @@ int Server::ConnectionInit()
         status = ERROR;
     };
 
-    cout << 2 << endl;
-
     if (listen(server_socket, 32) == -1) // 连接请求队列长度32
     {
         cerr << "ERROR: Failed to listen.\n";
         cout << "ERROR message: " << strerror(errno) << '\n';
         status = ERROR;
     };
-
-    cout << 3 << endl;
 
     evutil_make_socket_nonblocking(server_socket); // 设置无阻赛
 
@@ -131,14 +121,19 @@ int Server::ConnectionInit()
     // 注册事件，使事件处于 pending的等待状态
     event_add(ev, NULL);
 
+    // thread_pool.submit([this]
+    //                    { this->Print(); });
+
     // 事件循环
-    event_base_dispatch(base_event);
+    thread_pool.submit(event_base_dispatch, base_event);
 
     return status;
 }
 
-void Server::ConnectTo(const std::string &client_ip, const int &client_port)
+int Server::ConnectTo(const std::string &client_ip, const int &client_port)
 {
+    int status = SUCCESS;
+
     // 向服务器发起请求
     sockaddr_in client_address;
     memset(&client_address, 0, sizeof(client_address)); // 每个字节都⽤0填充
@@ -147,44 +142,33 @@ void Server::ConnectTo(const std::string &client_ip, const int &client_port)
     client_address.sin_addr.s_addr = inet_addr(client_ip.c_str()); // 将套接字与服务器绑定
     client_address.sin_port = htons(client_port);
 
-    connect(server_socket, (sockaddr *)&client_address, sizeof(sockaddr));
+    if (connect(server_socket, (sockaddr *)&client_address, sizeof(sockaddr)) < -1)
+    {
+        std::cerr << "ERROR:Failed to connect.\n";
+        status = ERROR;
+    }
+    return status;
+}
+void Server::Print()
+{
+    // while (1)
+    // {
+
+    if (!records.empty())
+    {
+        for (auto m : records) // todo:这里内存越界
+            cout << m << endl;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            records.clear();
+        }
+    }
+    // }
 }
 
 void Connect()
 {
 }
-
-// int Server::DatabaseInit()
-// {
-//     int status = SUCCESS;
-//     database = mysql_init(nullptr);
-//     if (database == nullptr)
-//     {
-//         cerr << "ERROR: Failed to init MySQL.\n";
-//         status = ERROR;
-//     }
-//     if (mysql_real_connect(database, server_ip.c_str(), "root", "12345678", "p2p", 3306, nullptr, 0) == nullptr)
-//     {
-//         cerr << "ERROR: Failed to connect MySQL.\n";
-//         status = ERROR;
-//     }
-
-//     string table_name{"chat_record_" + GetServerTime()}; // 每次启动服务器时都新建一张聊天记录表
-//     string sql_query = "create table " + table_name + " ("
-//                                                       "user_id int(9) not null,"
-//                                                       "user_name nvarchar(20) not null,"
-//                                                       "time_stamp int(9) not null,"
-//                                                       "message nvarchar(" +
-//                        std::to_string(msg_len) + ") not null,"
-//                                                  "primary key(user_id,time_stamp)"
-//                                                  ");";
-//     if (mysql_query(database, sql_query.c_str()))
-//     {
-//         cerr << "ERROR: Failed to create chat_record table.\n";
-//         status = ERROR;
-//     }
-//     return status;
-// }
 
 string Server::GetServerTime()
 {
@@ -197,34 +181,6 @@ string Server::GetServerTime()
     return string(buffer);
 }
 
-// int Server::GetMaxUserID()
-// {
-//     string sql_query = "select max(user_id) from user_info;";
-//     if (mysql_query(database, sql_query.c_str()))
-//     {
-//         cerr << "ERROR: Failed to get max user_id.\n";
-//         return ERROR;
-//     }
-
-//     MYSQL_RES *res = mysql_store_result(database);
-//     if (res == nullptr)
-//     {
-//         cerr << "ERROR: Failed to store result of max user_id.\n";
-//         return ERROR;
-//     }
-
-//     MYSQL_ROW row = mysql_fetch_row(res);
-//     if (row || row[0])
-//     {
-//         cerr << "ERROR: Failed to fetch row of max user_id.\n";
-//         return ERROR;
-//     }
-
-//     mysql_free_result(res);
-
-//     return atoi(row[0]);
-// }
-
 int Server::Send(const string &message, int client_socket)
 {
     int status = SUCCESS;
@@ -235,8 +191,6 @@ int Server::Send(const string &message, int client_socket)
         cout << "ERROR message: " << strerror(errno) << '\n';
         status = ERROR;
     }
-    cout << "Server::Send:" << message << endl;
-    close(client_socket);
 
     return status;
 }
@@ -254,9 +208,10 @@ void Server::BoardCast(const string &message)
             thread_pool.submit([args, base_event, s, message]()
                                {
                 event *ev;
-                ev = event_new(base_event, s, EV_TIMEOUT | EV_WRITE | EV_PERSIST,
-                        do_send, args.get()); // 超时触发 socket可读时触发 保持未决
-                event_add(ev, NULL); });
+                ev = event_new(base_event, s, EV_TIMEOUT | EV_WRITE ,
+                        do_send, args.get()); // 超时触发 socket可读时触发 不保持未决
+                event_add(ev, NULL);
+                event_base_dispatch(base_event); });
         }
     }
 }

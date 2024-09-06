@@ -100,7 +100,7 @@ public:
         // 需要根据任务数量和空闲线程的数量，判断是否需要创建新的线程出来
         if (m_poolMode == PoolMode::MODE_CACHED && m_taskSize > m_idleThreadSize && m_curThreadSize < m_threadSizeThreshHold)
         {
-            std::cout << ">>> create new thread..." << std::endl;
+            // std::cout << ">>> create new thread..." << std::endl;
             // 创建新的线程对象
             auto ptr = std::make_unique<Thread>(std::bind(&ThreadPool::threadFunc, this, std::placeholders::_1));
             int threadId = ptr->getId();

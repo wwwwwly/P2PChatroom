@@ -56,8 +56,9 @@ public:
     int Send(const std::string &message, int client_socket);
     void BoardCast(const std::string &message);
     int Receive(std::string &message, int client_socket);
-    void ConnectTo(const std::string &client_ip, const int &client_port);
+    int ConnectTo(const std::string &client_ip, const int &client_port);
     void Connect();
+    void Print();
 
     ~Server()
     {
