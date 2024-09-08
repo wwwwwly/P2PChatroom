@@ -3,6 +3,7 @@
 
 #include <string>
 #include <vector>
+#include <future>
 
 #include <unistd.h> //用于unix/linux系统，定义了大量系统调用函数
 
@@ -43,6 +44,7 @@ private:
     int msg_len = 300; /// 消息长度
 
 public:
+    std::promise<int> test;
     Server() {}
     Server(const std::string &_ip, const int &_port) : server_ip{_ip}, socket_port{_port}
     {

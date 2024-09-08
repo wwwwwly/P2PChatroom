@@ -21,6 +21,7 @@ void do_read(evutil_socket_t fd, short event_type, void *arg)
     Server *server = (Server *)arg;
     string message;
     server->Receive(message, fd);
+    if (!message.empty())
     {
         std::unique_lock<std::mutex> lock(server->mtx);
         server->records.emplace_back(std::move(message));
@@ -63,7 +64,7 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
 void do_send(evutil_socket_t fd, short event_type, void *arg)
 {
     SendArgs *args = (SendArgs *)arg;
-    args->server->Send(args->message, args->client_socket);
+    args->server->test.set_value(args->server->Send(args->message, args->client_socket));
 }
 
 std::vector<int> Server::client_sockets;
@@ -134,6 +135,7 @@ int Server::ConnectTo(const std::string &client_ip, const int &client_port)
 {
     int status = SUCCESS;
 
+    int client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP); // 这个client_socket暂时用不到
     // 向服务器发起请求
     sockaddr_in client_address;
     memset(&client_address, 0, sizeof(client_address)); // 每个字节都⽤0填充
@@ -142,28 +144,12 @@ int Server::ConnectTo(const std::string &client_ip, const int &client_port)
     client_address.sin_addr.s_addr = inet_addr(client_ip.c_str()); // 将套接字与服务器绑定
     client_address.sin_port = htons(client_port);
 
-    if (connect(server_socket, (sockaddr *)&client_address, sizeof(sockaddr)) < -1)
+    if (connect(client_socket, (sockaddr *)&client_address, sizeof(sockaddr)) < -1)
     {
         std::cerr << "ERROR:Failed to connect.\n";
         status = ERROR;
     }
     return status;
-}
-void Server::Print()
-{
-    // while (1)
-    // {
-
-    if (!records.empty())
-    {
-        for (auto m : records) // todo:这里内存越界
-            cout << m << endl;
-        {
-            std::unique_lock<std::mutex> lock(mtx);
-            records.clear();
-        }
-    }
-    // }
 }
 
 void Connect()
@@ -232,4 +218,21 @@ int Server::Receive(string &message, int client_socket)
     delete buffer;
 
     return status;
+}
+
+void Server::Print()
+{
+    // while (1)
+    // {
+
+    if (!records.empty())
+    {
+        for (auto m : records) // todo:这里内存越界
+            cout << m << endl;
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            records.clear();
+        }
+    }
+    // }
 }
