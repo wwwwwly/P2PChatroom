@@ -37,6 +37,7 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
     // 客户端socket
     int client_socket = accept(fd, (sockaddr *)&client_address,
                                &in_size); // 等待接受请求，这边是阻塞式的
+    // evutil_make_socket_nonblocking(client_socket); // 设置无阻赛
 
     if (client_socket < 0)
     {
@@ -64,7 +65,7 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
 void do_send(evutil_socket_t fd, short event_type, void *arg)
 {
     SendArgs *args = (SendArgs *)arg;
-    args->server->test.set_value(args->server->Send(args->message, args->client_socket));
+    args->server->Send(args->message, args->client_socket);
 }
 
 std::vector<int> Server::client_sockets;
@@ -207,14 +208,15 @@ int Server::Receive(string &message, int client_socket)
     int status = SUCCESS;
 
     char *buffer = new char[msg_len];
-    if (read(client_socket, buffer, msg_len) == -1)
+    int read_length = read(client_socket, buffer, msg_len);
+    if (read_length == -1)
     {
         cerr << "ERROR: Server failed to receive.\n";
         cout << "ERROR message: " << strerror(errno) << '\n';
         status = ERROR;
     }
 
-    message = string(buffer);
+    message = string(buffer, read_length);
     delete buffer;
 
     return status;

@@ -6,17 +6,17 @@ using namespace std;
 int main(int argc, char *argv[])
 {
     Server server{"192.168.182.129", 6666};
-    server.ConnectTo("192.168.182.129", 7777);
+    // server.ConnectTo("192.168.182.129", 7777);
     string message;
     std::future<int> test = server.test.get_future();
 
     while (1)
     {
         server.Print();
-        cin >> message;
-        server.BoardCast(message);
+        // cin >> message;
+        // server.BoardCast(message);
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        cout << test.get() << endl;
+        // cout << test.get() << endl;
     }
 
     cin.get();
