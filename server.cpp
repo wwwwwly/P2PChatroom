@@ -9,11 +9,19 @@
 #include <sys/socket.h>
 #include <netinet/in.h> // 定义TCP/IP相关的一些结构体和函数，包含了IPPROTO_TCP的定义
 #include <arpa/inet.h>  //主要处理IPV4地址的转换，网络字节序和主机字节序的转换，包含了inet_addr的定义
+#include <fcntl.h>
+#include <signal.h>
 
 using std::cerr;
 using std::cout;
 using std::endl;
 using std::string;
+
+std::unordered_set<int> Server::client_sockets;
+std::unordered_map<int, std::vector<event_base *>> Server::bases;
+std::unordered_map<int, std::vector<event *>> Server::events;
+std::mutex Server::mtx;
+std::vector<std::string> Server::records;
 
 // 读取客户端
 void do_read(evutil_socket_t fd, short event_type, void *arg)
@@ -41,21 +49,29 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
 
     if (client_socket < 0)
     {
-        perror("ERROR:Fail to accept.\n");
+        perror("ERROR:Failed to accept.\n");
         exit(1);
     }
     Server *server = (Server *)arg;
     // 类型转换
     event_base *base_event = event_base_new();
 
-    server->client_sockets.push_back(client_socket);
-    server->bases.push_back(base_event);
+    {
+        std::unique_lock<std::mutex> lock(server->mtx);
+        server->client_sockets.insert(client_socket);
+        server->bases.emplace(client_socket, std::vector<event_base *>(2, nullptr));
+        server->bases[client_socket][0] = base_event;
+    }
 
     server->thread_pool.submit([server](event_base *base_event, int client_socket)
                                {
         event *ev;
         ev = event_new(base_event, client_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
                    do_read, server); // 超时触发 socket可读时触发 保持未决
+        {
+            std::unique_lock<std::mutex> lock(server->mtx);
+            server->events[client_socket].push_back(ev);
+        }
         // 注册事件，使事件处于 pending的等待状态 
         event_add(ev, NULL); 
         // 事件循环
@@ -68,20 +84,17 @@ void do_send(evutil_socket_t fd, short event_type, void *arg)
     args->server->Send(args->message, args->client_socket);
 }
 
-std::vector<int> Server::client_sockets;
-std::vector<event_base *> Server::bases;
-std::mutex Server::mtx;
-std::vector<std::string> Server::records;
-
 int Server::ConnectionInit()
 {
+    // signal(SIGPIPE, SIG_IGN); // 忽略SIGPIPE信号
+
     int status = SUCCESS;
     server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 
     if (server_socket == -1)
     {
         cerr << "ERROR: Failed to create server socket.\n";
-        cout << "ERROR message: " << strerror(errno) << '\n';
+        cout << "ERROR message 3: " << strerror(errno) << '\n';
         status = ERROR;
     }
 
@@ -97,14 +110,14 @@ int Server::ConnectionInit()
     if (bind(server_socket, (sockaddr *)&server_addr, sizeof(server_addr)) == -1)
     {
         cerr << "ERROR: Failed to bind server socket.\n";
-        cout << "ERROR message: " << strerror(errno) << '\n';
+        cout << "ERROR message 4: " << strerror(errno) << '\n';
         status = ERROR;
     };
 
     if (listen(server_socket, 32) == -1) // 连接请求队列长度32
     {
         cerr << "ERROR: Failed to listen.\n";
-        cout << "ERROR message: " << strerror(errno) << '\n';
+        cout << "ERROR message 5: " << strerror(errno) << '\n';
         status = ERROR;
     };
 
@@ -112,13 +125,14 @@ int Server::ConnectionInit()
 
     // 创建event_base 事件的集合，多线程的话 每个线程都要初始化一个event_base
     event_base *base_event = event_base_new();
-    bases.push_back(base_event);
+    bases[server_socket].push_back(base_event);
 
     // 创建一个事件，类型为持久性EV_PERSIST，回调函数为do_accept（主要用于监听连接进来的客户端）
     // 将base_ev传递到do_accept中的arg参数
     event *ev;
     ev = event_new(base_event, server_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
                    do_accept, this);
+    events[server_socket].push_back(ev);
 
     // 注册事件，使事件处于 pending的等待状态
     event_add(ev, NULL);
@@ -150,6 +164,33 @@ int Server::ConnectTo(const std::string &client_ip, const int &client_port)
         std::cerr << "ERROR:Failed to connect.\n";
         status = ERROR;
     }
+
+    if (client_sockets.count(client_socket) == 0)
+    {
+        event_base *base_event = event_base_new();
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            client_sockets.insert(client_socket);
+            bases.emplace(client_socket, std::vector<event_base *>(2, nullptr));
+
+            bases[client_socket][0] = base_event;
+        }
+
+        thread_pool.submit([this](event_base *base_event, int client_socket)
+                           {
+        event *ev;
+        ev = event_new(base_event, client_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
+                   do_read, this); // 超时触发 socket可读时触发 保持未决
+        {
+            std::unique_lock<std::mutex> lock(mtx);
+            events[client_socket].push_back(ev);
+        }
+        // 注册事件，使事件处于 pending的等待状态 
+        event_add(ev, NULL); 
+        // 事件循环
+        event_base_dispatch(base_event); }, base_event, client_socket);
+    }
+
     return status;
 }
 
@@ -171,12 +212,25 @@ string Server::GetServerTime()
 int Server::Send(const string &message, int client_socket)
 {
     int status = SUCCESS;
-
-    if (write(client_socket, message.c_str(), message.size()) == -1)
+    if (!CheckSocket(client_socket))
     {
-        cerr << "ERROR: Server failed to send.\n";
-        cout << "ERROR message: " << strerror(errno) << '\n';
-        status = ERROR;
+        cerr << "ERROR: Server failed to send because of invalid socket.\n";
+        status = INVALID;
+        ClearSocket(client_socket);
+    }
+    else
+
+    {
+        int write_length = write(client_socket, message.c_str(), message.size());
+
+        if (write_length == -1)
+        {
+            cerr << "ERROR: Server failed to send.\n";
+            cout << "ERROR message 1: " << strerror(errno) << '\n';
+            status = ERROR;
+
+            ClearSocket(client_socket);
+        }
     }
 
     return status;
@@ -184,19 +238,26 @@ int Server::Send(const string &message, int client_socket)
 
 void Server::BoardCast(const string &message)
 {
+
     for (auto s : client_sockets)
     {
-        if (s != -1)
+        if (s != -1 && CheckSocket(s))
         {
-            event_base *base_event = event_base_new();
-            bases.push_back(base_event);
+            event_base *base_event = nullptr;
+            if (bases.at(s)[1] == nullptr)
+            {
+                bases[s][1] = event_base_new();
+            }
+            base_event = bases[s][1];
+
             std::shared_ptr<SendArgs> args = std::make_shared<SendArgs>(message, s, this);
 
             thread_pool.submit([args, base_event, s, message]()
                                {
                 event *ev;
                 ev = event_new(base_event, s, EV_TIMEOUT | EV_WRITE ,
-                        do_send, args.get()); // 超时触发 socket可读时触发 不保持未决
+                        do_send, args.get()); // 超时触发 socket可写时触发 不保持未决
+
                 event_add(ev, NULL);
                 event_base_dispatch(base_event); });
         }
@@ -212,8 +273,18 @@ int Server::Receive(string &message, int client_socket)
     if (read_length == -1)
     {
         cerr << "ERROR: Server failed to receive.\n";
-        cout << "ERROR message: " << strerror(errno) << '\n';
+        cout << "ERROR message 2: " << strerror(errno) << '\n';
         status = ERROR;
+
+        ClearSocket(client_socket);
+    }
+
+    else if (read_length == 0)
+    {
+        cout << "ERROR:Invalid socket.\n";
+        status = INVALID;
+
+        ClearSocket(client_socket);
     }
 
     message = string(buffer, read_length);
@@ -237,4 +308,42 @@ void Server::Print()
         }
     }
     // }
+}
+
+bool Server::CheckSocket(int client_socket)
+{
+    std::unique_lock<std::mutex> lock(mtx);
+    int flag = fcntl(client_socket, F_GETFL);
+    return (flag != -1 || errno != EBADF);
+}
+
+int Server::ClearSocket(int client_socket)
+{
+    int status = SUCCESS;
+    if (client_sockets.count(client_socket))
+    {
+        std::unique_lock<std::mutex> lock(mtx);
+        client_sockets.erase(client_socket);
+
+        for (auto &e : events[client_socket])
+        {
+            event_del(e);
+            event_free(e);
+            e = nullptr;
+        }
+        events.erase(client_socket);
+
+        for (auto &b : bases[client_socket])
+        {
+            event_base_loopbreak(b);
+            event_base_free(b);
+            b = nullptr;
+        }
+
+        bases.erase(client_socket);
+
+        close(client_socket);
+    }
+
+    return status;
 }

@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 #include <future>
+#include <unordered_set>
+#include <unordered_map>
 
 #include <unistd.h> //用于unix/linux系统，定义了大量系统调用函数
 
@@ -32,8 +34,10 @@ private:
     // int DatabaseInit();
     // int GetMaxUserID();
     ThreadPool thread_pool;
-    static std::vector<event_base *> bases;
-    static std::vector<int> client_sockets;
+
+    static std::unordered_map<int, std::vector<event_base *>> bases;
+    static std::unordered_map<int, std::vector<event *>> events;
+    static std::unordered_set<int> client_sockets;
     static std::mutex mtx;
     static std::vector<std::string> records;
 
@@ -61,20 +65,22 @@ public:
     int ConnectTo(const std::string &client_ip, const int &client_port);
     void Connect();
     void Print();
+    int ClearSocket(int client_socket);
+    bool CheckSocket(int client_socket);
 
     ~Server()
     {
         close(server_socket);
         // mysql_close(database);
-        for (auto b : bases)
-        {
-            // 销毁event_base
-            event_base_free(b);
-        }
+
         for (auto s : client_sockets)
         {
             if (s != -1)
+            {
                 close(s);
+                for (auto b : bases.at(s))
+                    event_base_free(b); // 销毁event_base
+            }
         }
     }
     friend void do_accept(evutil_socket_t fd, short event_type, void *arg);
