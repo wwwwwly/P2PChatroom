@@ -1,16 +1,20 @@
 #include "server.hpp"
 
 #include <iostream>
+#include <sstream>
 #include <memory>
 #include <ctime>
 #include <cstring>
 #include <memory>
+#include <chrono>
+#include <random>
 
 #include <sys/socket.h>
 #include <netinet/in.h> // 定义TCP/IP相关的一些结构体和函数，包含了IPPROTO_TCP的定义
 #include <arpa/inet.h>  //主要处理IPV4地址的转换，网络字节序和主机字节序的转换，包含了inet_addr的定义
 #include <fcntl.h>
-#include <signal.h>
+#include <boost/serialization/serialization.hpp> //-lboost_serialization
+#include <boost/serialization/string.hpp>
 
 using std::cerr;
 using std::cout;
@@ -20,8 +24,8 @@ using std::string;
 std::unordered_set<int> Server::client_sockets;
 std::unordered_map<int, std::vector<event_base *>> Server::bases;
 std::unordered_map<int, std::vector<event *>> Server::events;
-std::mutex Server::mtx;
-std::vector<std::string> Server::records;
+std::vector<std::mutex> Server::mtx{std::mutex(), std::mutex(), std::mutex()};
+std::vector<Message> Server::records;
 
 // 读取客户端
 void do_read(evutil_socket_t fd, short event_type, void *arg)
@@ -29,10 +33,13 @@ void do_read(evutil_socket_t fd, short event_type, void *arg)
     Server *server = (Server *)arg;
     string message;
     server->Receive(message, fd);
+    Message msg = server->Deserialize(message);
     if (!message.empty())
     {
-        std::unique_lock<std::mutex> lock(server->mtx);
-        server->records.emplace_back(std::move(message));
+        std::unique_lock<std::mutex> lock(server->mtx[FOR_RW]);
+        std::unique_lock<std::mutex> lock2(server->mtx[FOR_CLOCK]);
+        server->clock = std::max(server->clock, msg.clock) + 1; // 更新逻辑时钟
+        server->records.emplace_back(std::move(msg));
     }
 }
 
@@ -57,7 +64,7 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
     event_base *base_event = event_base_new();
 
     {
-        std::unique_lock<std::mutex> lock(server->mtx);
+        std::unique_lock<std::mutex> lock(server->mtx[FOR_RW]);
         server->client_sockets.insert(client_socket);
         server->bases.emplace(client_socket, std::vector<event_base *>(2, nullptr));
         server->bases[client_socket][0] = base_event;
@@ -69,7 +76,7 @@ void do_accept(evutil_socket_t fd, short event_type, void *arg)
         ev = event_new(base_event, client_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
                    do_read, server); // 超时触发 socket可读时触发 保持未决
         {
-            std::unique_lock<std::mutex> lock(server->mtx);
+            std::unique_lock<std::mutex> lock(server->mtx[FOR_RW]);
             server->events[client_socket].push_back(ev);
         }
         // 注册事件，使事件处于 pending的等待状态 
@@ -82,6 +89,18 @@ void do_send(evutil_socket_t fd, short event_type, void *arg)
 {
     SendArgs *args = (SendArgs *)arg;
     args->server->Send(args->message, args->client_socket);
+}
+
+Server::Server(const std::string &_ip, const int &_port) : server_ip{_ip}, socket_port{_port}
+{
+    ConnectionInit();
+    peer_id = GetPeerID();
+    // clock = std::vector<int>(max_peer_num, 0);
+    clock = 0;
+    // DatabaseInit();
+    // max_user_id = GetMaxUserID();
+    thread_pool.start();
+    thread_pool.setMode(PoolMode::MODE_CACHED);
 }
 
 int Server::ConnectionInit()
@@ -169,7 +188,7 @@ int Server::ConnectTo(const std::string &client_ip, const int &client_port)
     {
         event_base *base_event = event_base_new();
         {
-            std::unique_lock<std::mutex> lock(mtx);
+            std::unique_lock<std::mutex> lock(mtx[FOR_RW]);
             client_sockets.insert(client_socket);
             bases.emplace(client_socket, std::vector<event_base *>(2, nullptr));
 
@@ -182,7 +201,7 @@ int Server::ConnectTo(const std::string &client_ip, const int &client_port)
         ev = event_new(base_event, client_socket, EV_TIMEOUT | EV_READ | EV_PERSIST,
                    do_read, this); // 超时触发 socket可读时触发 保持未决
         {
-            std::unique_lock<std::mutex> lock(mtx);
+            std::unique_lock<std::mutex> lock(mtx[FOR_RW]);
             events[client_socket].push_back(ev);
         }
         // 注册事件，使事件处于 pending的等待状态 
@@ -209,7 +228,7 @@ string Server::GetServerTime()
     return string(buffer);
 }
 
-int Server::Send(const string &message, int client_socket)
+int Server::Send(const Message &msg, int client_socket)
 {
     int status = SUCCESS;
     if (!CheckSocket(client_socket))
@@ -219,8 +238,8 @@ int Server::Send(const string &message, int client_socket)
         ClearSocket(client_socket);
     }
     else
-
     {
+        string message = Serialize(msg);
         int write_length = write(client_socket, message.c_str(), message.size());
 
         if (write_length == -1)
@@ -250,7 +269,13 @@ void Server::BoardCast(const string &message)
             }
             base_event = bases[s][1];
 
-            std::shared_ptr<SendArgs> args = std::make_shared<SendArgs>(message, s, this);
+            {
+                std::unique_lock<std::mutex> lock(mtx[FOR_CLOCK]);
+                ++clock;
+            }
+            Message msg{peer_id, clock, message};
+
+            std::shared_ptr<SendArgs> args = std::make_shared<SendArgs>(msg, s, this);
 
             thread_pool.submit([args, base_event, s, message]()
                                {
@@ -295,24 +320,20 @@ int Server::Receive(string &message, int client_socket)
 
 void Server::Print()
 {
-    // while (1)
-    // {
-
     if (!records.empty())
     {
-        for (auto m : records) // todo:这里内存越界
-            cout << m << endl;
+        for (auto m : records)
+            cout << m.peer_id << '\t' << m.clock << '\t' << m.message << endl;
         {
-            std::unique_lock<std::mutex> lock(mtx);
+            std::unique_lock<std::mutex> lock(mtx[FOR_RW]);
             records.clear();
         }
     }
-    // }
 }
 
 bool Server::CheckSocket(int client_socket)
 {
-    std::unique_lock<std::mutex> lock(mtx);
+    std::unique_lock<std::mutex> lock(mtx[FOR_RW]);
     int flag = fcntl(client_socket, F_GETFL);
     return (flag != -1 || errno != EBADF);
 }
@@ -322,7 +343,7 @@ int Server::ClearSocket(int client_socket)
     int status = SUCCESS;
     if (client_sockets.count(client_socket))
     {
-        std::unique_lock<std::mutex> lock(mtx);
+        std::unique_lock<std::mutex> lock(mtx[FOR_RW]);
         client_sockets.erase(client_socket);
 
         for (auto &e : events[client_socket])
@@ -346,4 +367,40 @@ int Server::ClearSocket(int client_socket)
     }
 
     return status;
+}
+
+boost::uuids::uuid Server::GetPeerID() // 生成节点ID
+{
+    boost::uuids::uuid id = boost::uuids::random_generator()();
+    return id;
+}
+
+std::string Server::Serialize(const Message &msg)
+{
+    std::ostringstream oss;
+    boost::archive::text_oarchive oa(oss);
+    oa << msg;
+    return oss.str();
+}
+
+Message Server::Deserialize(const std::string &message)
+{
+    std::istringstream iss(message);
+    boost::archive::text_iarchive ia(iss);
+    Message msg;
+    ia >> msg;
+    return msg;
+}
+Server::~Server()
+{
+    close(server_socket);
+    // mysql_close(database);
+
+    for (auto s : client_sockets)
+    {
+        if (s != -1)
+        {
+            ClearSocket(s);
+        }
+    }
 }

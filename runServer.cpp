@@ -1,17 +1,14 @@
 #include "server.hpp"
 #include "ThreadPool.hpp"
-#include <signal.h>
 
 using namespace std;
 
 int main(int argc, char *argv[])
 {
-    // signal(SIGPIPE, SIG_IGN); // 忽略SIGPIPE信号
 
     Server server{"192.168.182.129", 6666};
     server.ConnectTo("192.168.182.129", 7777);
     string message;
-    std::future<int> test = server.test.get_future();
 
     while (1)
     {
